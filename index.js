@@ -10,37 +10,23 @@ const stripe = require('stripe')(process.env.PAYMENT_SECRET_KEY)
 
 const port = process.env.PORT || 5000
 const app = express()
-// middleware
+
 const corsOptions = {
-  origin: ['http://localhost:5173', 'http://localhost:5174', 'https://medi-quest-c6cb9.web.app'],
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'https://medi-quest-c6cb9.web.app',
+  ],
   credentials: true,
   optionSuccessStatus: 200,
 }
 app.use(cors(corsOptions))
-
 app.use(express.json())
 app.use(cookieParser())
 app.use(morgan('dev'))
 
-const verifyToken = async (req, res, next) => {
-  const token = req.cookies?.token
-
-  if (!token) {
-    return res.status(401).send({ message: 'unauthorized access' })
-  }
-  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
-    if (err) {
-      console.log(err)
-      return res.status(401).send({ message: 'unauthorized access' })
-    }
-    req.user = decoded
-    next()
-  })
-}
-
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@mycluster1.rs796.mongodb.net/?retryWrites=true&w=majority&appName=myCluster1`
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -48,164 +34,51 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 })
+
+// Verify JWT
+const verifyToken = async (req, res, next) => {
+  const token = req.cookies?.token
+  if (!token) {
+    return res.status(401).send({ message: 'Unauthorised access' })
+  }
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(401).send({ message: 'Unauthorised access' })
+    }
+    req.user = decoded
+    next()
+  })
+}
+
 async function run() {
   try {
-
     const db = client.db('MediQuest_2')
     const userCollection = db.collection('users')
     const medicinesCollection = db.collection('medicines')
     const ordersCollection = db.collection('orders')
+    const categoriesCollection = db.collection('categories')
+    const paymentsCollection = db.collection('payments')
+    const advertisementsCollection = db.collection('advertisements')
 
-    // verify admin middleware
+    // Role middleware
     const verifyAdmin = async (req, res, next) => {
-      // console.log('hello',req.user?.email);
       const email = req.user?.email
-      const query = { email }
-      const result = await userCollection.findOne(query)
-      if (!result || result?.role !== 'admin')
-        return res.status(403).send({ message: 'Forbidden access ! Admin Only' })
-      next()
-    }
-
-    // verify seller middleware
-    const verifySeller = async (req, res, next) => {
-      // console.log('hello',req.user?.email);
-      const email = req.user?.email
-      const query = { email }
-      const result = await userCollection.findOne(query)
-      if (!result || result?.role !== 'seller')
-        return res.status(403).send({ message: 'Forbidden access! Seller Only' })
-      next()
-    }
-
-
-    // save or update users in db
-    app.post('/users/:email', async (req, res) => {
-      const email = req.params.email
-      const query = { email }
-      const user = req.body
-      // check if user already exists
-      const isExist = await userCollection.findOne(query)
-      if (isExist) {
-        return res.send(isExist)
-      }
-      const result = await userCollection.insertOne({
-        ...user,
-        timestamp: Date.now(),
-        role: 'customer',
-
-      })
-      res.send(result)
-
-    })
-
-    // manage user role
-    app.patch('/users/:email', verifyToken, async (req, res) => {
-      const email = req.params.email
-
-      const query = { email }
-      const user = await userCollection.findOne(query)
-      if (!user || user?.status === 'requested') {
-        return res.status(400).send({ message: 'Already Requested, wait some time' })
-      }
-      const { status } = req.body
-      const updateDoc = {
-        $set: {
-          status: 'requested',
-        },
-      }
-      const result = await userCollection.updateOne(query, updateDoc)
-      res.send(result)
-    })
-
-    // get all users
-    app.get('/all-users/:email', verifyToken, verifyAdmin, async (req, res) => {
-      const email = req.params.email
-      const query = { email: { $ne: email } }
-      const result = await userCollection.find(query).toArray()
-      res.send(result)
-    })
-
-    //  GET user data by email
-    app.get('/user/:email', verifyToken, async (req, res) => {
-      const email = req.params.email;
-      const user = await userCollection.findOne({ email });
-      if (!user) return res.status(404).send({ message: 'User not found' });
-      res.send(user);
-    });
-
-    // UPDATE user profile
-    app.put('/update-profile', verifyToken, async (req, res) => {
-      const { email, displayName, photoURL } = req.body;
-      if (!email) return res.status(400).send({ message: 'Email is required' });
-
-      const existingUser = await userCollection.findOne({ email });
-      if (existingUser.displayName === displayName && existingUser.photoURL === photoURL) {
-        return res.status(400).send({ message: 'No changes detected' });
-      }
-
-      const updatedData = { $set: { displayName, photoURL } };
-      const result = await userCollection.updateOne({ email }, updatedData);
-
-      if (result.modifiedCount > 0) {
-        res.send({ message: 'Profile updated successfully' });
-      } else {
-        res.status(400).send({ message: 'Failed to update profile' });
-      }
-    });
-
-    // update password
-    app.post('/update-password', async (req, res) => {
-      const { email, currentPassword, newPassword } = req.body;
-
-      try {
-        // Verify the current password
-        const user = await admin.auth().getUserByEmail(email);
-        const auth = getAuth(); // Firebase Auth instance
-
-        // Reauthenticate the user
-        const credential = firebase.auth.EmailAuthProvider.credential(
-          email,
-          currentPassword
-        );
-        await reauthenticateWithCredential(auth.currentUser, credential);
-
-        // Update the password
-        await admin.auth().updateUser(user.uid, {
-          password: newPassword,
-        });
-
-        res.status(200).json({ success: true, message: 'Password updated successfully.' });
-      } catch (error) {
-        console.error('Error updating password:', error);
-        res.status(400).json({ success: false, message: error.message });
-      }
-    });
-
-
-    // get user role
-    app.get('/users/role/:email', async (req, res) => {
-      const email = req.params.email
       const result = await userCollection.findOne({ email })
-      // console.log(result);
-      res.send(result)
-    })
+      if (!result || result?.role !== 'admin')
+        return res.status(403).send({ message: 'Forbidden access! Admin only' })
+      next()
+    }
 
-    // update user role
-    app.patch('/users/role/:email', verifyToken, async (req, res) => {
-      const email = req.params.email
-      const { role } = req.body
-      const filter = { email }
-      const updateDoc = {
-        $set: {
-          role, status: 'verified'
-        },
-      }
-      const result = await userCollection.updateOne(filter, updateDoc)
-      res.send(result)
-    })
+    const verifySeller = async (req, res, next) => {
+      const email = req.user?.email
+      const result = await userCollection.findOne({ email })
+      if (!result || result?.role !== 'seller')
+        return res.status(403).send({ message: 'Forbidden access! Seller only' })
+      next()
+    }
 
-    // Generate jwt token
+    // ── AUTH ──
+
     app.post('/jwt', async (req, res) => {
       const email = req.body
       const token = jwt.sign(email, process.env.ACCESS_TOKEN_SECRET, {
@@ -219,7 +92,7 @@ async function run() {
         })
         .send({ success: true })
     })
-    // Logout
+
     app.get('/logout', async (req, res) => {
       try {
         res
@@ -234,96 +107,269 @@ async function run() {
       }
     })
 
+    // ── USERS ──
 
-    // add medicine
+    app.post('/users/:email', async (req, res) => {
+      const email = req.params.email
+      const user = req.body
+      const isExist = await userCollection.findOne({ email })
+      if (isExist) {
+        return res.send(isExist)
+      }
+      const result = await userCollection.insertOne({
+        ...user,
+        role: user.role || 'customer',
+        status: 'verified',
+        timestamp: Date.now(),
+      })
+      res.send(result)
+    })
+
+    app.patch('/users/:email', verifyToken, async (req, res) => {
+      const email = req.params.email
+      const user = await userCollection.findOne({ email })
+      if (!user || user?.status === 'requested') {
+        return res.status(400).send({ message: 'Already requested, please wait' })
+      }
+      const result = await userCollection.updateOne(
+        { email },
+        { $set: { status: 'requested' } }
+      )
+      res.send(result)
+    })
+
+    app.get('/all-users/:email', verifyToken, verifyAdmin, async (req, res) => {
+      const email = req.params.email
+      const result = await userCollection.find({ email: { $ne: email } }).toArray()
+      res.send(result)
+    })
+
+    app.get('/user/:email', verifyToken, async (req, res) => {
+      const email = req.params.email
+      const user = await userCollection.findOne({ email })
+      if (!user) return res.status(404).send({ message: 'User not found' })
+      res.send(user)
+    })
+
+    app.put('/update-profile', verifyToken, async (req, res) => {
+      const { email, displayName, photoURL } = req.body
+      if (!email) return res.status(400).send({ message: 'Email is required' })
+      const result = await userCollection.updateOne(
+        { email },
+        { $set: { displayName, photoURL } }
+      )
+      if (result.modifiedCount > 0) {
+        res.send({ message: 'Profile updated successfully' })
+      } else {
+        res.status(400).send({ message: 'No changes detected' })
+      }
+    })
+
+    app.get('/users/role/:email', async (req, res) => {
+      const email = req.params.email
+      const result = await userCollection.findOne({ email })
+      res.send(result || {})
+    })
+
+    app.patch('/users/role/:email', verifyToken, async (req, res) => {
+      const email = req.params.email
+      const { role } = req.body
+      const result = await userCollection.updateOne(
+        { email },
+        { $set: { role, status: 'verified' } }
+      )
+      res.send(result)
+    })
+
+    // ── CATEGORIES ──
+
+    const categoryCount = await categoriesCollection.countDocuments()
+    if (categoryCount === 0) {
+      await categoriesCollection.insertMany([
+        { name: 'General', image: 'https://i.pinimg.com/736x/ab/dd/86/abdd86bdf15f836984614d9632f767af.jpg' },
+        { name: 'Prescribed', image: 'https://i.pinimg.com/736x/d1/a6/89/d1a68989dd575390ef9d18d0e11fcc7d.jpg' },
+        { name: 'Infectious', image: 'https://i.pinimg.com/736x/65/0e/9b/650e9b057cc715ffe1128759fcd2c281.jpg' },
+        { name: 'Veterinary', image: 'https://i.pinimg.com/736x/27/ee/92/27ee92a68141a60fd923d5f8eb23c13f.jpg' },
+        { name: 'Ointment', image: 'https://i.pinimg.com/736x/83/41/14/834114c36b2de6e52ba34b25e38666dd.jpg' },
+        { name: 'Suppliment', image: 'https://i.pinimg.com/736x/89/8f/14/898f14df25a037b725c607af884a022f.jpg' },
+      ])
+    }
+
+    app.get('/categories', async (req, res) => {
+      const categories = await categoriesCollection.find().toArray()
+      const counts = await medicinesCollection
+        .aggregate([{ $group: { _id: '$category', count: { $sum: 1 } } }])
+        .toArray()
+      const countMap = {}
+      counts.forEach((c) => (countMap[c._id] = c.count))
+      const result = categories.map((cat) => ({
+        ...cat,
+        medicineCount: countMap[cat.name] || 0,
+      }))
+      res.send(result)
+    })
+
+    app.post('/categories', verifyToken, verifyAdmin, async (req, res) => {
+      const { name, image } = req.body
+      const exists = await categoriesCollection.findOne({ name })
+      if (exists) return res.status(400).send({ message: 'Category already exists' })
+      const result = await categoriesCollection.insertOne({ name, image })
+      res.send(result)
+    })
+
+    app.patch('/categories/:id', verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id
+      const { name, image } = req.body
+      const result = await categoriesCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { name, image } }
+      )
+      res.send(result)
+    })
+
+    app.delete('/categories/:id', verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id
+      const result = await categoriesCollection.deleteOne({ _id: new ObjectId(id) })
+      res.send(result)
+    })
+
+    // ── MEDICINES ──
+
     app.post('/medicines', verifyToken, verifySeller, async (req, res) => {
       const med = req.body
       const result = await medicinesCollection.insertOne(med)
       res.send(result)
-      // console.log('Request Body:', req.body);
-      // res.send('Received!');
     })
 
-    // get medicine
     app.get('/medicines', async (req, res) => {
-      const result = await medicinesCollection.find().toArray()
-      res.send(result)
-    })
+      const page = parseInt(req.query.page) || 1
+      const limit = parseInt(req.query.limit) || 0
+      const search = req.query.search || ''
+      const sort = req.query.sort || ''
+      const category = req.query.category || ''
 
-    // get medicine by category
-    app.get('/medicines/category/:category', async (req, res) => {
-      try {
-        const category = req.params.category;
-        const query = { category: category };
-        const result = await medicinesCollection.find(query).toArray();
-        res.send(result);
-      } catch (err) {
-        console.log(err);
+      let query = {}
+      if (search) {
+        query.$or = [
+          { name: { $regex: search, $options: 'i' } },
+          { genericName: { $regex: search, $options: 'i' } },
+          { company: { $regex: search, $options: 'i' } },
+          { category: { $regex: search, $options: 'i' } },
+        ]
+      }
+      if (category) {
+        query.category = category
       }
 
+      let sortOption = {}
+      if (sort === 'asc') sortOption = { price: 1 }
+      else if (sort === 'desc') sortOption = { price: -1 }
+
+      const skip = limit > 0 ? (page - 1) * limit : 0
+      const total = await medicinesCollection.countDocuments(query)
+      let cursor = medicinesCollection.find(query).sort(sortOption)
+      if (limit > 0) {
+        cursor = cursor.skip(skip).limit(limit)
+      }
+      const result = await cursor.toArray()
+      res.send({ medicines: result, total })
     })
 
-    // get medicine by id
+    app.get('/medicines/discount', async (req, res) => {
+      const result = await medicinesCollection.find({ discount: { $gt: 0 } }).toArray()
+      res.send(result)
+    })
+
+    app.get('/medicines/category/:category', async (req, res) => {
+      const category = req.params.category
+      const page = parseInt(req.query.page) || 1
+      const limit = parseInt(req.query.limit) || 10
+      const search = req.query.search || ''
+      const sort = req.query.sort || ''
+
+      let query = { category }
+      if (search) {
+        query.$and = [
+          { category },
+          {
+            $or: [
+              { name: { $regex: search, $options: 'i' } },
+              { genericName: { $regex: search, $options: 'i' } },
+              { company: { $regex: search, $options: 'i' } },
+            ],
+          },
+        ]
+        delete query.category
+      }
+
+      let sortOption = {}
+      if (sort === 'asc') sortOption = { price: 1 }
+      else if (sort === 'desc') sortOption = { price: -1 }
+
+      const total = await medicinesCollection.countDocuments(query)
+      const result = await medicinesCollection
+        .find(query)
+        .sort(sortOption)
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .toArray()
+      res.send({ medicines: result, total })
+    })
+
     app.get('/medicines/:id', async (req, res) => {
       const id = req.params.id
-      const query = { _id: new ObjectId(id) }
-      const result = await medicinesCollection.findOne(query)
+      const result = await medicinesCollection.findOne({ _id: new ObjectId(id) })
       res.send(result)
     })
 
-    // save order to db
-    app.post('/order', verifyToken, async (req, res) => {
-      const orderInfo = req.body
-      const result = await ordersCollection.insertOne(orderInfo)
-      res.send(result)
-      // console.log('Request Body:', req.body);
-      // res.send('Received!');
-    })
-
-    // get inventory data for seller
     app.get('/meds/seller', verifyToken, verifySeller, async (req, res) => {
       const email = req.user.email
       const result = await medicinesCollection.find({ 'seller.email': email }).toArray()
       res.send(result)
     })
 
-    // delete medicine by seller
     app.delete('/medicines/:id', verifyToken, verifySeller, async (req, res) => {
       const id = req.params.id
-      const query = { _id: new ObjectId(id) }
-      const result = await medicinesCollection.deleteOne(query)
+      const result = await medicinesCollection.deleteOne({ _id: new ObjectId(id) })
       res.send(result)
     })
 
-    // medicine quantity after purchase
+    app.put('/medicines/:id', verifyToken, verifySeller, async (req, res) => {
+      const id = req.params.id
+      const updateData = req.body
+      delete updateData._id
+      const result = await medicinesCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: updateData }
+      )
+      res.send(result)
+    })
+
     app.patch('/medicines/quantity/:id', verifyToken, async (req, res) => {
       const id = req.params.id
       const { quantityToUpdate, status } = req.body
-      const filter = { _id: new ObjectId(id) }
-      let updateDoc = {
-        $inc: { quantity: -quantityToUpdate },
-      }
-      if (status === 'increase') {
-        updateDoc = {
-          $inc: { quantity: quantityToUpdate },
-        }
-      }
-      const result = await medicinesCollection.updateOne(filter, updateDoc)
+      const inc = status === 'increase' ? quantityToUpdate : -quantityToUpdate
+      const result = await medicinesCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $inc: { quantity: inc } }
+      )
       res.send(result)
     })
 
-    // get orders from a user
+    // ── ORDERS ──
+
+    app.post('/order', verifyToken, async (req, res) => {
+      const orderInfo = req.body
+      const result = await ordersCollection.insertOne(orderInfo)
+      res.send(result)
+    })
+
     app.get('/customer-orders/:email', verifyToken, async (req, res) => {
       const email = req.params.email
-      const query = { "customer.email": email }
-      const result = await ordersCollection.aggregate(
-        [
-          { $match: query },
-          {
-            $addFields: {
-              medId: { $toObjectId: "$medId" },
-            },
-          },
+      const result = await ordersCollection
+        .aggregate([
+          { $match: { 'customer.email': email } },
+          { $addFields: { medId: { $toObjectId: '$medId' } } },
           {
             $lookup: {
               from: 'medicines',
@@ -332,40 +378,26 @@ async function run() {
               as: 'medicines',
             },
           },
-          {
-            '$unwind': '$medicines'
-          },
+          { $unwind: '$medicines' },
           {
             $addFields: {
               name: '$medicines.name',
               image: '$medicines.image',
               category: '$medicines.category',
-            }
+            },
           },
-          {
-            $project: {
-              medicines: 0,
-            }
-          }
-
-        ]
-      ).toArray()
+          { $project: { medicines: 0 } },
+        ])
+        .toArray()
       res.send(result)
     })
 
-
-    // get orders for seller
     app.get('/seller-orders/:email', verifyToken, verifySeller, async (req, res) => {
       const email = req.params.email
-      console.log(email);
-      const result = await ordersCollection.aggregate(
-        [
+      const result = await ordersCollection
+        .aggregate([
           { $match: { seller: email } },
-          {
-            $addFields: {
-              medId: { $toObjectId: "$medId" },
-            },
-          },
+          { $addFields: { medId: { $toObjectId: '$medId' } } },
           {
             $lookup: {
               from: 'medicines',
@@ -374,145 +406,251 @@ async function run() {
               as: 'medicines',
             },
           },
-          {
-            '$unwind': '$medicines'
-          },
-          {
-            $addFields: {
-              name: '$medicines.name',
-            }
-          },
-          {
-            $project: {
-              medicines: 0,
-            }
-          }
-        ]
-      ).toArray()
-      // console.log(result);
+          { $unwind: '$medicines' },
+          { $addFields: { name: '$medicines.name' } },
+          { $project: { medicines: 0 } },
+        ])
+        .toArray()
       res.send(result)
     })
 
-    // cancel delete order
     app.delete('/order/:id', verifyToken, async (req, res) => {
       const id = req.params.id
-      const query = { _id: new ObjectId(id) }
-      const order = await ordersCollection.findOne(query)
-      if (order.status === 'delivered') {
+      const order = await ordersCollection.findOne({ _id: new ObjectId(id) })
+      if (order?.status === 'delivered') {
         return res.status(409).send({ message: 'Order already delivered' })
       }
-      const result = await ordersCollection.deleteOne(query)
+      const result = await ordersCollection.deleteOne({ _id: new ObjectId(id) })
       res.send(result)
     })
 
-    // update order status
     app.patch('/orders/:id', verifyToken, verifySeller, async (req, res) => {
       const id = req.params.id
       const { status } = req.body
-      const filter = { _id: new ObjectId(id) }
-      const updateDoc = {
-        $set: { status },
-      }
-      const result = await ordersCollection.updateOne(filter, updateDoc)
+      const result = await ordersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status } }
+      )
       res.send(result)
     })
 
-    // admin stat
-    app.get('/admin-stat', verifyToken, verifyAdmin, async (req, res) => {
-      // total user, total medicine
-      const totalUser = await userCollection.countDocuments()
-      const totalMedicines = await medicinesCollection.estimatedDocumentCount()
-      const allOrder = await ordersCollection.find().toArray()
-      // const totalOrders = allOrder.length
-      // const totalPrice = allOrder.reduce((sum, order) => sum + order.price, 0)
-      //  get total revenue, total order
-      const orderDetails = await ordersCollection.aggregate([
-        {
-          $group: {
-            _id: null,
-            totalRevenue: { $sum: '$price' },
-            totalOrder: { $sum: 1 }
-          },
-        },
-        {
-          $project: {
-            _id: 0,
-          },
-        },
-      ])
-        .next()
-      res.send({ totalMedicines, totalUser, ...orderDetails,chartData })
-    })
+    // ── PAYMENTS ──
 
-    // chart data
-    const chartData = await ordersCollection.aggregate([
-      {
-        $group: {
-          _id: {
-            $dateToString: {
-              format: '%Y-%m-%d',
-              date: {$toDate: '$_id'}
-            },
-          },
-          quantity: {
-            $sum: '$quantity',
-
-          },
-          price: { $sum: '$price' },
-          order: {$sum: 1},
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          date: '$_id',
-          quantity: 1,
-          order: 1,
-          price: 1,
-        }
+    app.post('/create-payment-intent', verifyToken, async (req, res) => {
+      const { amount } = req.body
+      if (!amount || amount <= 0) {
+        return res.status(400).send({ message: 'Invalid amount' })
       }
-    ]).next()
-
-    // create payment intent
-    app.post('/create-payment-intent/', verifyToken, async (req, res) => {
-      const { quantity, medId } = req.body
-      const med = await medicinesCollection.findOne({
-        _id: new ObjectId(medId)
-      })
-      if (!med) {
-        return res.status(400).send({message: "medicine not found"})
-      }
-      const totalPrice = quantity * med.price * 100
-      // res.send({totalPrice})
-      // console.log(totalPrice);
-      const {client_secret} = await stripe.paymentIntents.create({
+      const totalPrice = Math.round(amount * 100)
+      const { client_secret } = await stripe.paymentIntents.create({
         amount: totalPrice,
         currency: 'usd',
-        automatic_payment_methods: {
-          enabled: true,
-        },
+        automatic_payment_methods: { enabled: true },
       })
-      res.send({clientSecret :client_secret})
+      res.send({ clientSecret: client_secret })
     })
 
+    app.post('/payments', verifyToken, async (req, res) => {
+      const paymentData = req.body
+      const result = await paymentsCollection.insertOne({
+        ...paymentData,
+        status: 'pending',
+        date: new Date(),
+      })
+      res.send(result)
+    })
 
+    // Admin: all payments
+    app.get('/admin/payments', verifyToken, verifyAdmin, async (req, res) => {
+      const result = await paymentsCollection.find().sort({ date: -1 }).toArray()
+      res.send(result)
+    })
 
-    // console.log(chartData);
-    // Send a ping to confirm a successful connection
-    // await client.db('admin').command({ ping: 1 })
-    // console.log(
-    //   'Pinged your deployment. You successfully connected to MongoDB!'
-    // )
+    // Admin: accept payment
+    app.patch('/admin/payments/:id', verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id
+      const result = await paymentsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status: 'paid' } }
+      )
+      res.send(result)
+    })
+
+    // User payment history
+    app.get('/payments/:email', verifyToken, async (req, res) => {
+      const email = req.params.email
+      const result = await paymentsCollection.find({ buyerEmail: email }).sort({ date: -1 }).toArray()
+      res.send(result)
+    })
+
+    // Seller payment history
+    app.get('/seller-payments/:email', verifyToken, verifySeller, async (req, res) => {
+      const email = req.params.email
+      const result = await paymentsCollection
+        .find({ 'items.sellerEmail': email })
+        .sort({ date: -1 })
+        .toArray()
+      res.send(result)
+    })
+
+    // ── SALES REPORT (Admin) ──
+
+    app.get('/admin/sales-report', verifyToken, verifyAdmin, async (req, res) => {
+      const { startDate, endDate } = req.query
+      let match = {}
+      if (startDate && endDate) {
+        match.date = {
+          $gte: new Date(startDate),
+          $lte: new Date(endDate + 'T23:59:59.999Z'),
+        }
+      }
+      const result = await paymentsCollection.find(match).sort({ date: -1 }).toArray()
+      res.send(result)
+    })
+
+    // ── ADVERTISEMENTS / BANNERS ──
+
+    app.post('/advertisements', verifyToken, verifySeller, async (req, res) => {
+      const adData = req.body
+      const result = await advertisementsCollection.insertOne({
+        ...adData,
+        status: 'pending',
+        inSlider: false,
+      })
+      res.send(result)
+    })
+
+    app.get('/advertisements/seller/:email', verifyToken, verifySeller, async (req, res) => {
+      const email = req.params.email
+      const result = await advertisementsCollection.find({ sellerEmail: email }).toArray()
+      res.send(result)
+    })
+
+    app.get('/admin/advertisements', verifyToken, verifyAdmin, async (req, res) => {
+      const result = await advertisementsCollection.find().toArray()
+      res.send(result)
+    })
+
+    app.patch('/admin/advertisements/:id', verifyToken, verifyAdmin, async (req, res) => {
+      const id = req.params.id
+      const ad = await advertisementsCollection.findOne({ _id: new ObjectId(id) })
+      const result = await advertisementsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { inSlider: !ad.inSlider } }
+      )
+      res.send(result)
+    })
+
+    app.get('/slider-banners', async (req, res) => {
+      const result = await advertisementsCollection.find({ inSlider: true }).toArray()
+      res.send(result)
+    })
+
+    // ── STATISTICS ──
+
+    app.get('/admin-stat', verifyToken, verifyAdmin, async (req, res) => {
+      const totalUser = await userCollection.countDocuments()
+      const totalMedicines = await medicinesCollection.estimatedDocumentCount()
+
+      const paidPayments = await paymentsCollection
+        .aggregate([
+          { $match: { status: 'paid' } },
+          { $group: { _id: null, total: { $sum: '$totalAmount' } } },
+        ])
+        .next()
+
+      const pendingPayments = await paymentsCollection
+        .aggregate([
+          { $match: { status: 'pending' } },
+          { $group: { _id: null, total: { $sum: '$totalAmount' } } },
+        ])
+        .next()
+
+      const orderDetails = await paymentsCollection
+        .aggregate([
+          {
+            $group: {
+              _id: null,
+              totalRevenue: { $sum: '$totalAmount' },
+              totalOrder: { $sum: 1 },
+            },
+          },
+          { $project: { _id: 0 } },
+        ])
+        .next()
+
+      const chartData = await paymentsCollection
+        .aggregate([
+          {
+            $group: {
+              _id: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
+              price: { $sum: '$totalAmount' },
+              order: { $sum: 1 },
+            },
+          },
+          { $project: { _id: 0, date: '$_id', price: 1, order: 1 } },
+          { $sort: { date: 1 } },
+        ])
+        .toArray()
+
+      res.send({
+        totalMedicines,
+        totalUser,
+        paidTotal: paidPayments?.total || 0,
+        pendingTotal: pendingPayments?.total || 0,
+        ...orderDetails,
+        chartData,
+      })
+    })
+
+    app.get('/seller-stat/:email', verifyToken, verifySeller, async (req, res) => {
+      const email = req.params.email
+
+      const paidPayments = await paymentsCollection
+        .aggregate([
+          { $match: { status: 'paid', 'items.sellerEmail': email } },
+          { $unwind: '$items' },
+          { $match: { 'items.sellerEmail': email } },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+            },
+          },
+        ])
+        .next()
+
+      const pendingPayments = await paymentsCollection
+        .aggregate([
+          { $match: { status: 'pending', 'items.sellerEmail': email } },
+          { $unwind: '$items' },
+          { $match: { 'items.sellerEmail': email } },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+            },
+          },
+        ])
+        .next()
+
+      res.send({
+        paidTotal: paidPayments?.total || 0,
+        pendingTotal: pendingPayments?.total || 0,
+      })
+    })
+
   } finally {
-    // Ensures that the client will close when you finish/error
+    // client closes when process exits
   }
 }
+
 run().catch(console.dir)
 
 app.get('/', (req, res) => {
-  res.send('Hello from Mediquest Server 2..')
+  res.send('Hello from MediQuest Server 2..')
 })
 
 app.listen(port, () => {
-  console.log(`Mediquest is running on port ${port}`)
+  console.log(`MediQuest is running on port ${port}`)
 })
