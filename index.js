@@ -37,7 +37,7 @@ const client = new MongoClient(uri, {
 
 // Verify JWT
 const verifyToken = async (req, res, next) => {
-  const token = req.cookies?.token
+  const token = req.cookies?.token || req.headers.authorization?.split(' ')[1]
   if (!token) {
     return res.status(401).send({ message: 'Unauthorised access' })
   }
@@ -90,7 +90,7 @@ async function run() {
           secure: process.env.NODE_ENV === 'production',
           sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
         })
-        .send({ success: true })
+        .send({ success: true, token })
     })
 
     app.get('/logout', async (req, res) => {
