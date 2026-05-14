@@ -101,7 +101,7 @@ async function run() {
             secure: process.env.NODE_ENV === 'production',
             sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
           })
-          
+
           .send({ success: true })
       } catch (err) {
         res.status(500).send(err)
@@ -442,7 +442,8 @@ async function run() {
       if (!amount || amount <= 0) {
         return res.status(400).send({ message: 'Invalid amount' })
       }
-      const totalPrice = Math.round(amount * 100)
+      // Stripe minimum is 50 cents
+      const totalPrice = Math.max(Math.round(amount * 100), 50)
       const { client_secret } = await stripe.paymentIntents.create({
         amount: totalPrice,
         currency: 'usd',
