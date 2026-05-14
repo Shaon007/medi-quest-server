@@ -233,7 +233,7 @@ async function run() {
       res.send(result)
     })
 
-    // ── MEDICINES ──
+    // MEDICINES
 
     app.post('/medicines', verifyToken, verifySeller, async (req, res) => {
       const med = req.body
@@ -356,7 +356,7 @@ async function run() {
       res.send(result)
     })
 
-    // ── ORDERS ──
+    //  ORDERS
 
     app.post('/order', verifyToken, async (req, res) => {
       const orderInfo = req.body
@@ -434,7 +434,7 @@ async function run() {
       res.send(result)
     })
 
-    // ── PAYMENTS ──
+    // PAYMENTS
 
     app.post('/create-payment-intent', verifyToken, async (req, res) => {
       const { amount } = req.body
