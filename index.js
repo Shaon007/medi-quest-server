@@ -77,7 +77,7 @@ async function run() {
       next()
     }
 
-    // ── AUTH ──
+    // AUTH
 
     app.post('/jwt', async (req, res) => {
       const email = req.body
@@ -107,7 +107,7 @@ async function run() {
       }
     })
 
-    // ── USERS ──
+    // USERS
 
     app.post('/users/:email', async (req, res) => {
       const email = req.params.email
@@ -181,7 +181,7 @@ async function run() {
       res.send(result)
     })
 
-    // ── CATEGORIES ──
+    //  CATEGORIES
 
     const categoryCount = await categoriesCollection.countDocuments()
     if (categoryCount === 0) {
