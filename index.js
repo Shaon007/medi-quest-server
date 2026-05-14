@@ -92,7 +92,6 @@ async function run() {
         })
         .send({ success: true, token })
     })
-
     app.get('/logout', async (req, res) => {
       try {
         res
