@@ -426,10 +426,13 @@ async function run() {
 
     app.patch('/orders/:id', verifyToken, verifySeller, async (req, res) => {
       const id = req.params.id
-      const { status } = req.body
+      const { status, sellerComment } = req.body
+      const updateFields = {}
+      if (status) updateFields.status = status
+      if (sellerComment !== undefined) updateFields.sellerComment = sellerComment
       const result = await ordersCollection.updateOne(
         { _id: new ObjectId(id) },
-        { $set: { status } }
+        { $set: updateFields }
       )
       res.send(result)
     })
